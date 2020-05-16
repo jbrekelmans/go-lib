@@ -1,5 +1,7 @@
 # Introduction
-A collection of Go libraries:
+A collection of Go libraries.
+
+# Index
 1. [auth/google/compute](auth/google/compute): verification of Google Compute Engine identity JSON Web Tokens (see [Google's documentation](https://cloud.google.com/compute/docs/instances/verifying-instance-identity#verify_signature)). This is useful for applications that want to accept an authentication mechanism based on Google Cloud Platform's Identity Access Management infrastructure.
 1. [test](test): logrus logging in tests. For example:
     ```go
