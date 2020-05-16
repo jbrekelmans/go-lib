@@ -141,7 +141,6 @@ func (a *InstanceIdentityVerifier) validateRFCClaims(c *jwt.Claims) error {
 }
 
 // Verify authenticates a GCE identity JWT token (see https://cloud.google.com/compute/docs/instances/verifying-instance-identity).
-// Inspired by https://github.com/hashicorp/vault-plugin-auth-gcp/blob/8450f263d8d262b6c4871ff2576373c17dbe1687/plugin/path_login.go#L145
 func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, error) {
 	if a.jwksProvider == nil {
 		return nil, fmt.Errorf("a must be created via NewInstanceIdentityVerifier")
