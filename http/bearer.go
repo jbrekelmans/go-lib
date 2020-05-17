@@ -13,7 +13,7 @@ const (
 	AuthenticationSchemeBearer = "Bearer"
 )
 
-// BearerTokenAuthorizer is a function that authorizes a token passed via the Bearer authentication scheme.
+// BearerTokenAuthorizer is a function that authorizes a token.
 // If err is nil then data must not be nil.
 // data is an unspecified representation of a permissions that is passed along opaquely by the Authorizer returned by NewBearerAuthorizer.
 // To set the WWW-Authenticate response header, err should be a *WWWAuthenticateError.
