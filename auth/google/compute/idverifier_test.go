@@ -9,6 +9,7 @@ import (
 	"github.com/jbrekelmans/go-lib/test"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/iam/v1"
 )
 
 var testAudience = "https://example.com/"
@@ -29,6 +30,9 @@ var testJWTToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImMxNzcxODE0YmE2YTcwNjkzZmI5NDEy
 	"MGaBGh2-JXmlYM5Cmu-IiG4D1CppcS3Gh7-lAFWCZ6GjQs1z2QnDjiTpFuwBVTa8gJ1H91ETKbe005PuQnpY65OBq8G3KdnUq2FwQ9sMZsaDGVE8cAZ" +
 	"-lK-AY7rGi2_WbkR30ANOxH6ZQGhfTh1-uZ9rFr27fWZg"
 var testKeySetProvider google.KeySetProvider
+var testServiceAccount = &iam.ServiceAccount{
+	Email: "198285616681-compute@developer.gserviceaccount.com",
+}
 var testTimeNow time.Time
 
 func init() {
@@ -46,21 +50,25 @@ func init() {
 	log.SetLevel(log.TraceLevel)
 }
 
-func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (a *InstanceIdentityVerifier, teardown func()) {
+func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (i *InstanceIdentityVerifier, teardown func()) {
 	disposable := test.RedirectLogs(t)
 	timeSource := func() time.Time {
 		return testTimeNow
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	opts = append([]InstanceIdentityVerifierOption{
+		WithAllowNonUserManagedServiceAccounts(true),
 		WithKeySetProvider(testKeySetProvider),
-		WithTimeSource(timeSource),
 		WithInstanceGetter(func(ctx context.Context, project, instance, name string) (*compute.Instance, error) {
 			return testInstance, nil
 		}),
+		WithServiceAccountGetter(func(ctx context.Context, name string) (*iam.ServiceAccount, error) {
+			return testServiceAccount, nil
+		}),
+		WithTimeSource(timeSource),
 	}, opts...)
 	var err error
-	a, err = NewInstanceIdentityVerifier(ctx, testAudience, opts...)
+	i, err = NewInstanceIdentityVerifier(ctx, testAudience, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,18 +88,18 @@ func Test_InstanceIdentityVerifier_Verify_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if i.RFCJWTClaims != nil {
-		if i.RFCJWTClaims.Subject != "115586174090660717475" {
-			t.Logf("unexpected subject: %s", i.RFCJWTClaims.Subject)
+	if i.Claims1 != nil {
+		if i.Claims1.Subject != "115586174090660717475" {
+			t.Logf("unexpected subject: %s", i.Claims1.Subject)
 			t.Fail()
 		}
-		if i.GoogleJWTClaims.ProjectID != "scratch-playground" || i.GoogleJWTClaims.Zone != "australia-southeast1-b" ||
-			i.GoogleJWTClaims.InstanceName != "instance-1" {
-			t.Logf("unexpected Google JWT claims: %+v", i.GoogleJWTClaims)
+		if i.Claims2.Google.ComputeEngine.ProjectID != "scratch-playground" || i.Claims2.Google.ComputeEngine.Zone != "australia-southeast1-b" ||
+			i.Claims2.Google.ComputeEngine.InstanceName != "instance-1" {
+			t.Logf("unexpected Claims2.Google.ComputeEngine: %+v", i.Claims2.Google.ComputeEngine)
 			t.Fail()
 		}
 	} else {
-		t.Logf("missing RFC JWT claims")
+		t.Logf("missing Claims1")
 		t.Fail()
 	}
 }

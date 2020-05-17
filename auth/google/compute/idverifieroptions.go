@@ -10,6 +10,14 @@ import (
 // InstanceIdentityVerifierOption is an option that can be passed to NewInstanceIdentityVerifier.
 type InstanceIdentityVerifierOption = func(a *InstanceIdentityVerifier)
 
+// WithAllowNonUserManagedServiceAccounts returns an option for NewInstanceIdentityVerifier that sets whether non-user-managed service
+// accounts are allowed. In other words: default service account are rejected.
+func WithAllowNonUserManagedServiceAccounts(v bool) InstanceIdentityVerifierOption {
+	return func(a *InstanceIdentityVerifier) {
+		a.allowNonUserManagedServiceAccounts = v
+	}
+}
+
 // WithInstanceGetter returns an option for NewInstanceIdentityVerifier that sets the compute instance getter.
 func WithInstanceGetter(v InstanceGetter) InstanceIdentityVerifierOption {
 	return func(a *InstanceIdentityVerifier) {
@@ -42,6 +50,13 @@ func WithMaximumJWTNotExpiredPeriod(v time.Duration) InstanceIdentityVerifierOpt
 	}
 	return func(a *InstanceIdentityVerifier) {
 		a.maximumJWTNotExpiredPeriod = v
+	}
+}
+
+// WithServiceAccountGetter returns an option for NewInstanceIdentityVerifier that sets the service account getter.
+func WithServiceAccountGetter(v google.ServiceAccountGetter) InstanceIdentityVerifierOption {
+	return func(a *InstanceIdentityVerifier) {
+		a.serviceAccountGetter = v
 	}
 }
 

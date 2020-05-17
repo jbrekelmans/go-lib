@@ -5,16 +5,9 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	jaspersync "github.com/jbrekelmans/go-lib/sync"
 )
-
-// PanicError is an error that can be returned from functions to communicate a recoverable panic occured on another Goroutine.
-type PanicError struct {
-	Data interface{}
-}
-
-func (p *PanicError) Error() string {
-	return fmt.Sprintf("another Goroutine panicked: %v", p.Data)
-}
 
 // CachedEvaluator is a cache for an evaluator (a function) such that the evaluator is expensive enough to justify ensuring that only
 // one Goroutine should be running the evaluator at any one time (and other Goroutines will wait as needed).
@@ -23,7 +16,7 @@ func (p *PanicError) Error() string {
 type CachedEvaluator interface {
 	GetCacheOnly() (value interface{})
 
-	// err can be a *PanicError in circumstances where the Goroutine computing the value panics and the panic is recoverable.
+	// err can be a *"github.com/jbrekelmans/go-lib/sync".PanicError in circumstances where the Goroutine computing the value panics and the panic is recoverable.
 	Get(ctx context.Context) (value interface{}, err error)
 
 	// Evaluate is the same as Get, except:
@@ -104,7 +97,7 @@ func (c *cachedEvaluator) evaluateLockedSection() *operation {
 			if canRecover {
 				// If we get here then a call to factory panicked
 				data := recover()
-				o.err = &PanicError{
+				o.err = &jaspersync.PanicError{
 					Data: data,
 				}
 				close(waitChannel)
