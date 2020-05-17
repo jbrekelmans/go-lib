@@ -9,11 +9,13 @@ import (
 	"github.com/hashicorp/go-cleanhttp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
 	"gopkg.in/square/go-jose.v2/jwt"
 
 	"github.com/jbrekelmans/go-lib/auth"
 	"github.com/jbrekelmans/go-lib/auth/google"
+	jaspersync "github.com/jbrekelmans/go-lib/sync"
 )
 
 const (
@@ -23,11 +25,20 @@ const (
 	InstanceStatusStopping = "STOPPING"
 )
 
-// InstanceGetter is an abstraction for Go's compute engine service for the purpose of unit testing.
+// InstanceGetter is an abstraction for Google's Golang compute engine service for the purpose of unit testing.
 type InstanceGetter = func(ctx context.Context, projectID, zone, instanceName string) (*compute.Instance, error)
 
-// InstanceIdentityJWTClaims is part of InstanceIdentityJWTClaims.
+// InstanceIdentityJWTClaims has holds the claims of an instance identity JWT token that are not in "gopkg.in/square/go-jose.v2/jwt".Claims.
 type InstanceIdentityJWTClaims struct {
+	AuthorizedParty string `json:"azp"`
+	Email           string `json:"email"`
+	Google          *struct {
+		ComputeEngine *InstanceIdentityGCEJWTClaims `json:"compute_engine"`
+	} `json:"google"`
+}
+
+// InstanceIdentityGCEJWTClaims is part of InstanceIdentityJWTClaims.
+type InstanceIdentityGCEJWTClaims struct {
 	ProjectID     string `json:"project_id"`
 	ProjectNumber int64  `json:"project_number"`
 	Zone          string `json:"zone"`
@@ -38,22 +49,23 @@ type InstanceIdentityJWTClaims struct {
 	LicenseID                 []string `json:"license_id"`
 }
 
-// InstanceIdentity contains information obtained during verification of an instance's identity. See (*InstanceIdentityVerifier).Verify.
+// InstanceIdentity contains claims of an instance identity JWT token. See InstanceIdentityVerifier.Verify.
 type InstanceIdentity struct {
-	GoogleJWTClaims *InstanceIdentityJWTClaims
-	Instance        *compute.Instance
-	RFCJWTClaims    *jwt.Claims
+	Claims1 *jwt.Claims
+	Claims2 *InstanceIdentityJWTClaims
 }
 
 // InstanceIdentityVerifier is type that verifies instance identities. See NewInstanceIdentityVerifier and https://cloud.google.com/compute/docs/instances/verifying-instance-identity.
 type InstanceIdentityVerifier struct {
-	audience                   string
-	ctx                        context.Context
-	computeIntanceGetter       InstanceGetter
-	jwtClaimsLeeway            time.Duration
-	keySetProvider             google.KeySetProvider
-	maximumJWTNotExpiredPeriod time.Duration
-	timeSource                 func() time.Time
+	allowNonUserManagedServiceAccounts bool
+	audience                           string
+	ctx                                context.Context
+	computeIntanceGetter               InstanceGetter
+	jwtClaimsLeeway                    time.Duration
+	keySetProvider                     google.KeySetProvider
+	maximumJWTNotExpiredPeriod         time.Duration
+	serviceAccountGetter               google.ServiceAccountGetter
+	timeSource                         func() time.Time
 }
 
 // NewInstanceIdentityVerifier is the constructor for InstanceIdentityVerifier. See https://cloud.google.com/compute/docs/instances/verifying-instance-identity.
@@ -80,17 +92,30 @@ func NewInstanceIdentityVerifier(ctx context.Context, audience string, opts ...I
 	}
 	var computeService *compute.Service
 	if a.computeIntanceGetter == nil {
-		var computeServiceOptions []option.ClientOption
-		if defaultHTTPClient != nil {
-			computeServiceOptions = append(computeServiceOptions, option.WithHTTPClient(defaultHTTPClient))
+		if defaultHTTPClient == nil {
+			defaultHTTPClient = cleanhttp.DefaultPooledClient()
 		}
 		var err error
-		computeService, err = compute.NewService(ctx, computeServiceOptions...)
+		computeService, err = compute.NewService(ctx, option.WithHTTPClient(defaultHTTPClient))
 		if err != nil {
 			return nil, fmt.Errorf("error creating compute service: %w", err)
 		}
 		a.computeIntanceGetter = func(ctx context.Context, project, zone, instance string) (*compute.Instance, error) {
 			return computeService.Instances.Get(project, zone, instance).Context(ctx).Do()
+		}
+	}
+	var iamService *iam.Service
+	if a.serviceAccountGetter == nil {
+		if defaultHTTPClient == nil {
+			defaultHTTPClient = cleanhttp.DefaultPooledClient()
+		}
+		var err error
+		iamService, err = iam.NewService(ctx, option.WithHTTPClient(defaultHTTPClient))
+		if err != nil {
+			return nil, fmt.Errorf("error creating iam service: %w", err)
+		}
+		a.serviceAccountGetter = func(ctx context.Context, name string) (*iam.ServiceAccount, error) {
+			return iamService.Projects.ServiceAccounts.Get(name).Context(ctx).Do()
 		}
 	}
 	if a.timeSource == nil {
@@ -99,28 +124,8 @@ func NewInstanceIdentityVerifier(ctx context.Context, audience string, opts ...I
 	return a, nil
 }
 
-func (a *InstanceIdentityVerifier) validateComputeEngineClaims(c *InstanceIdentityJWTClaims) (*compute.Instance, error) {
-	instance, err := a.computeIntanceGetter(a.ctx, c.ProjectID, c.Zone, c.InstanceName)
-	if err != nil {
-		return nil, fmt.Errorf("error during get API call: %w", err)
-	}
-	// Only Running and Stopping are valid, see https://cloud.google.com/compute/docs/instances/instance-life-cycle
-	if instance.Status != InstanceStatusRunning && instance.Status != InstanceStatusStopping {
-		return nil, fmt.Errorf("instance has illegal status %#v", instance.Status)
-	}
-	creationTime, err := time.Parse(time.RFC3339Nano, instance.CreationTimestamp)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing instance's creation timestamp: %w", err)
-	}
-	if creationTime.Unix() != c.InstanceCreationTimestamp {
-		return nil, fmt.Errorf("JWT claims instance creation timestamp is %d, but it is actually %d (in unix timestamps)",
-			c.InstanceCreationTimestamp,
-			creationTime.Unix())
-	}
-	return instance, nil
-}
-
-func (a *InstanceIdentityVerifier) validateRFCClaims(c *jwt.Claims) error {
+func (a *InstanceIdentityVerifier) validateClaims1(c *jwt.Claims) error {
+	log.Tracef("Claims1: %+v", c)
 	now := a.timeSource()
 	err := c.ValidateWithLeeway(jwt.Expected{
 		Audience: []string{
@@ -139,6 +144,53 @@ func (a *InstanceIdentityVerifier) validateRFCClaims(c *jwt.Claims) error {
 	notExpiredPeriod := expiry.Sub(now)
 	if notExpiredPeriod-a.jwtClaimsLeeway > a.maximumJWTNotExpiredPeriod {
 		return fmt.Errorf(`JWT must expire after at most %v, but it expires after %v`, a.maximumJWTNotExpiredPeriod, notExpiredPeriod-a.jwtClaimsLeeway)
+	}
+	return nil
+}
+
+func (a *InstanceIdentityVerifier) validateClaims2(ctx context.Context, c *InstanceIdentityJWTClaims) error {
+	project := c.Google.ComputeEngine.ProjectID
+	zone := c.Google.ComputeEngine.Zone
+	instance, err := a.computeIntanceGetter(ctx, project, zone, c.Google.ComputeEngine.InstanceName)
+	if err != nil {
+		return fmt.Errorf("error during get call: %w", err)
+	}
+	// Only Running and Stopping are valid, see https://cloud.google.com/compute/docs/instances/instance-life-cycle
+	if instance.Status != InstanceStatusRunning && instance.Status != InstanceStatusStopping {
+		return fmt.Errorf("instance has illegal status %#v", instance.Status)
+	}
+	creationTime, err := time.Parse(time.RFC3339Nano, instance.CreationTimestamp)
+	if err != nil {
+		return fmt.Errorf("error parsing instance's creation timestamp: %w", err)
+	}
+	if creationTime.Unix() != c.Google.ComputeEngine.InstanceCreationTimestamp {
+		return fmt.Errorf("JWT claims instance creation timestamp is %d, but it is actually %d (in unix timestamps)",
+			c.Google.ComputeEngine.InstanceCreationTimestamp,
+			creationTime.Unix())
+	}
+	found := false
+	for _, serviceAccount := range instance.ServiceAccounts {
+		if serviceAccount.Email == c.Email {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("JWT claims email %#v, but the instance has no service account with that email", c.Email)
+	}
+	return nil
+}
+
+func (a *InstanceIdentityVerifier) validateServiceAccountClaims(ctx context.Context, email, uniqueID string) error {
+	serviceAccount, err := a.serviceAccountGetter(ctx, fmt.Sprintf("projects/*/serviceAccounts/%s", uniqueID))
+	if err != nil {
+		return fmt.Errorf("error during API call: %w", err)
+	}
+	if serviceAccount.Email != email {
+		return fmt.Errorf("JWT claims email %#v, but it is actually %#v", email, serviceAccount.Email)
+	}
+	if serviceAccount.Disabled {
+		return fmt.Errorf("service account is disabled")
 	}
 	return nil
 }
@@ -164,38 +216,53 @@ func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, 
 	if !ok {
 		return nil, fmt.Errorf("no key with identifier %#v exists", keyID)
 	}
-	rfcClaims := &jwt.Claims{}
-	googleClaims := &struct {
-		Google *struct {
-			ComputeEngine *InstanceIdentityJWTClaims `json:"compute_engine"`
-		} `json:"google"`
-	}{}
-	if err := jwtParsed.Claims(key.PublicKey, rfcClaims, googleClaims); err != nil {
+	claims1 := &jwt.Claims{}
+	claims2 := &InstanceIdentityJWTClaims{}
+	if err := jwtParsed.Claims(key.PublicKey, claims1, claims2); err != nil {
 		return nil, fmt.Errorf("error verifying JWT signature or decoding claims: %w", err)
 	}
-	if err := a.validateRFCClaims(rfcClaims); err != nil {
+	if err := a.validateClaims1(claims1); err != nil {
 		return nil, err
 	}
-	if googleClaims.Google == nil {
+	log.Tracef("Claims2: %+v", claims2)
+	if claims2.Google == nil {
 		return nil, fmt.Errorf(`JWT does not have required claim "google"`)
 	}
-	if googleClaims.Google.ComputeEngine == nil {
+	if claims2.Google.ComputeEngine == nil {
 		return nil, fmt.Errorf(`JWT has claim "google" with an object value, but the object does not have a required entry with key ` +
 			`"compute_engine"`)
 	}
-	log.Tracef("RFC claims: %+v", rfcClaims)
-	log.Tracef("Google claims: %+v", googleClaims.Google.ComputeEngine)
-	instance, err := a.validateComputeEngineClaims(googleClaims.Google.ComputeEngine)
-	if err != nil {
-		project := googleClaims.Google.ComputeEngine.ProjectID
-		zone := googleClaims.Google.ComputeEngine.Zone
-		instance := googleClaims.Google.ComputeEngine.InstanceName
-		return nil, fmt.Errorf("error validating JWT with respect to compute engine claim (instance %s/%s/%s): %w", project, zone, instance,
-			err)
+	log.Tracef("Claims2.Google.ComputeEngine: %+v", claims2.Google.ComputeEngine)
+	if claims1.Subject != claims2.AuthorizedParty {
+		return nil, fmt.Errorf(`JWT claims "azp" and "sub" must be equal, but got %#v and %#v`, claims2.AuthorizedParty, claims1.Subject)
 	}
+	if claims1.Subject == claims2.Email {
+		return nil, fmt.Errorf(`JWT claims "email" and "sub" must not be equal, but they are (%#v)`, claims2.Email)
+	}
+	_, err = google.ParseUserManagedServiceAccountFromEmail(claims2.Email)
+	if err != nil && !a.allowNonUserManagedServiceAccounts {
+		return nil, fmt.Errorf(`JWT claim "email" (%#v) is not a vallid email or it illegally is not a user-managed service account email`,
+			claims2.Email)
+	}
+	err = jaspersync.CallInParallelReturnWhenAnyError(a.ctx, func(ctx context.Context) error {
+		err := a.validateClaims2(ctx, claims2)
+		if err != nil {
+			project := claims2.Google.ComputeEngine.ProjectID
+			zone := claims2.Google.ComputeEngine.Zone
+			instance := claims2.Google.ComputeEngine.InstanceName
+			return fmt.Errorf("error validating JWT claims against compute engine API (instance %s/%s/%s): %w", project, zone, instance,
+				err)
+		}
+		return nil
+	}, func(ctx context.Context) error {
+		err := a.validateServiceAccountClaims(ctx, claims2.Email, claims1.Subject)
+		if err != nil {
+			return fmt.Errorf("error validating JWT claims against IAM API (service account %s): %w", claims1.Subject, err)
+		}
+		return nil
+	})
 	return &InstanceIdentity{
-		Instance:        instance,
-		GoogleJWTClaims: googleClaims.Google.ComputeEngine,
-		RFCJWTClaims:    rfcClaims,
+		Claims1: claims1,
+		Claims2: claims2,
 	}, nil
 }
