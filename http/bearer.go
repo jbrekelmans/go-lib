@@ -13,10 +13,10 @@ const (
 	AuthenticationSchemeBearer = "Bearer"
 )
 
-// BearerTokenAuthorizer is a function that authorizes a token from the Bearer authentication scheme.
+// BearerTokenAuthorizer is a function that authorizes a token passed via the Bearer authentication scheme.
 // If err is nil then data must not be nil.
 // data is an unspecified representation of a permissions that is passed along opaquely by the Authorizer returned by NewBearerAuthorizer.
-// To set the WWWW-Authenticate response header, err should be a *WWWAuthenticateError.
+// To set the WWW-Authenticate response header, err should be a *WWWAuthenticateError.
 type BearerTokenAuthorizer = func(bearerToken string) (data interface{}, err error)
 
 type bearerAuthorizer struct {
