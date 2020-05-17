@@ -4,6 +4,15 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"time"
+)
+
+const (
+	// DefaultJWTClaimsLeeway is a common default for JWT claims leeway.
+	// Leeway is defined by https://godoc.org/gopkg.in/square/go-jose.v2/jwt#Claims.ValidateWithLeeway.
+	DefaultJWTClaimsLeeway = time.Second * 60
+	// DefaultMaximumJWTNotExpiredPeriod is a common default for the maximum allowed period that a JWT is not expired.
+	DefaultMaximumJWTNotExpiredPeriod = time.Minute * 60
 )
 
 const pemBlockTypeCertificate = "CERTIFICATE"

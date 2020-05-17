@@ -12,8 +12,8 @@ import (
 	"google.golang.org/api/option"
 	"gopkg.in/square/go-jose.v2/jwt"
 
+	"github.com/jbrekelmans/go-lib/auth"
 	"github.com/jbrekelmans/go-lib/auth/google"
-	"github.com/jbrekelmans/go-lib/auth/jose"
 )
 
 const (
@@ -51,8 +51,8 @@ type InstanceIdentityVerifier struct {
 	ctx                        context.Context
 	computeIntanceGetter       InstanceGetter
 	jwtClaimsLeeway            time.Duration
+	keySetProvider             google.KeySetProvider
 	maximumJWTNotExpiredPeriod time.Duration
-	jwksProvider               jose.JWKSProvider
 	timeSource                 func() time.Time
 }
 
@@ -64,16 +64,19 @@ func NewInstanceIdentityVerifier(ctx context.Context, audience string, opts ...I
 	a := &InstanceIdentityVerifier{
 		audience:                   audience,
 		ctx:                        ctx,
-		jwtClaimsLeeway:            jose.DefaultJWTClaimsLeeway,
-		maximumJWTNotExpiredPeriod: jose.DefaultMaximumJWTNotExpiredPeriod,
+		jwtClaimsLeeway:            auth.DefaultJWTClaimsLeeway,
+		maximumJWTNotExpiredPeriod: auth.DefaultMaximumJWTNotExpiredPeriod,
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
 	var defaultHTTPClient *http.Client
-	if a.jwksProvider == nil {
+	if a.keySetProvider == nil {
 		defaultHTTPClient = cleanhttp.DefaultPooledClient()
-		a.jwksProvider = google.HTTPSJWKSProvider(defaultHTTPClient)
+		a.keySetProvider = google.CachingKeySetProvider(
+			google.DefaultCachingKeySetProviderTimeToLive,
+			google.HTTPSKeySetProvider(defaultHTTPClient),
+		)
 	}
 	var computeService *compute.Service
 	if a.computeIntanceGetter == nil {
@@ -142,7 +145,7 @@ func (a *InstanceIdentityVerifier) validateRFCClaims(c *jwt.Claims) error {
 
 // Verify authenticates a GCE identity JWT token (see https://cloud.google.com/compute/docs/instances/verifying-instance-identity).
 func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, error) {
-	if a.jwksProvider == nil {
+	if a.keySetProvider == nil {
 		return nil, fmt.Errorf("a must be created via NewInstanceIdentityVerifier")
 	}
 	jwtParsed, err := jwt.ParseSigned(jwtString)
@@ -152,10 +155,14 @@ func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, 
 	if len(jwtParsed.Headers) != 1 {
 		return nil, fmt.Errorf("jwtString must encode a JWT with exactly one header")
 	}
-	kid := jwtParsed.Headers[0].KeyID
-	key, err := a.jwksProvider.Get(a.ctx, kid)
+	keySet, err := a.keySetProvider.Get(a.ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error getting public key used forJWT signature verification: %w", err)
+		return nil, fmt.Errorf("error getting public key used for JWT signature verification: %w", err)
+	}
+	keyID := jwtParsed.Headers[0].KeyID
+	key, ok := keySet[keyID]
+	if !ok {
+		return nil, fmt.Errorf("no key with identifier %#v exists", keyID)
 	}
 	rfcClaims := &jwt.Claims{}
 	googleClaims := &struct {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jbrekelmans/go-lib/auth/jose"
+	"github.com/jbrekelmans/go-lib/auth/google"
 	"github.com/jbrekelmans/go-lib/test"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/compute/v1"
@@ -28,12 +28,12 @@ var testJWTToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImMxNzcxODE0YmE2YTcwNjkzZmI5NDEy
 	"tfgTSyWHhMF8rkkOd8w4C4RNliCakrRMXip7XqSt0eqn1G381TNMLpmgKzfKFZ4IOpNTKnNus-CYo1Mm712kRGzT4saglT3W54r7jKU7sdVeisfpJoK" +
 	"MGaBGh2-JXmlYM5Cmu-IiG4D1CppcS3Gh7-lAFWCZ6GjQs1z2QnDjiTpFuwBVTa8gJ1H91ETKbe005PuQnpY65OBq8G3KdnUq2FwQ9sMZsaDGVE8cAZ" +
 	"-lK-AY7rGi2_WbkR30ANOxH6ZQGhfTh1-uZ9rFr27fWZg"
-var testJWKS jose.JWKSProvider
+var testKeySetProvider google.KeySetProvider
 var testTimeNow time.Time
 
 func init() {
 	var err error
-	testJWKS, err = jose.StaticJWKSProvider(map[string]string{
+	testKeySetProvider, err = google.StaticKeySetProvider(map[string]string{
 		"c1771814ba6a70693fb9412da3c6e90c2bf5b927": "-----BEGIN CERTIFICATE-----\nMIIDJjCCAg6gAwIBAgIINA9D6ntD6UwwDQYJKoZIhvcNAQEFBQAwNjE0MDIGA1UE\nAxMrZmVkZXJhdGVkLXNpZ25vbi5zeXN0ZW0uZ3NlcnZpY2VhY2NvdW50LmNvbTAe\nFw0yMDA1MDgwNDI5MzJaFw0yMDA1MjQxNjQ0MzJaMDYxNDAyBgNVBAMTK2ZlZGVy\nYXRlZC1zaWdub24uc3lzdGVtLmdzZXJ2aWNlYWNjb3VudC5jb20wggEiMA0GCSqG\nSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDEcofKwYd9lvL3ay0DILheSnu3YhvpMSFr\nUbXVTAaCau/umCmMoEmQ7Ve2+9PYvekTKWFwqEuA7x/HlH6spx57Nn9ilPK5PW8c\nexZgnF6hxXmbRXvT82+B/KyXqVL+B299Prx0w2TUQvxsiT26IIwii1WlyrgUh4gP\nvkN6d2r+hO5c5lV4KLWvyrSp4xY3ucVkQkKfHNrI05MTv54LwVExGK757e062Su6\nBrcLPraeSSsa1DIBpC1Se2sNNDGMTZM2EG9YFYNU5+8b64J7YmSF8MLsJmUTq2kG\nj5WTIgYZmNHmoGVhMrHpkmNZ5ALXeWnB3tYHW8q0FIoYfa8q4FutAgMBAAGjODA2\nMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBYGA1UdJQEB/wQMMAoGCCsG\nAQUFBwMCMA0GCSqGSIb3DQEBBQUAA4IBAQCDmHmX0May2yvcY/YEKMZIleBzIJrZ\nIs2COueb5KwUy13aORB2vCsIA6xZh9onhOlDaf7Hd5ZziMQsn4+mo1ta3nxKInXC\nYvf3YnNOThTEgZY3ZOfI5wDs4sGVEkiF+VHdMOj4AFrB2Fapyh2NwyiSiXR+yFcW\nishQj9Lh9h1dBdz2C3ZcVzP0f9Fjfqj27N6h5PA7ooBSgXmXR2zCbT5n9+LykT3G\nyMGS0j7XL+EmO8LiLAbxW6Zxyvjd6NFD3VA2+FtgT+rVzOIIiDTDttStC3PqhbwT\n87QGg8tCjnYVAuXPrBWfoxPBNUAAWSgVdh1gsJ7sehDEofBiKJ5oU9cH\n-----END CERTIFICATE-----\n",
 	})
 	if err != nil {
@@ -53,7 +53,7 @@ func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (a *InstanceIde
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	opts = append([]InstanceIdentityVerifierOption{
-		WithJWKSProvider(testJWKS),
+		WithKeySetProvider(testKeySetProvider),
 		WithTimeSource(timeSource),
 		WithInstanceGetter(func(ctx context.Context, project, instance, name string) (*compute.Instance, error) {
 			return testInstance, nil

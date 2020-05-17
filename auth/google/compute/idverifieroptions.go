@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jbrekelmans/go-lib/auth/jose"
+	"github.com/jbrekelmans/go-lib/auth/google"
 )
 
 // InstanceIdentityVerifierOption is an option that can be passed to NewInstanceIdentityVerifier.
@@ -28,10 +28,10 @@ func WithJWTClaimsLeeway(v time.Duration) InstanceIdentityVerifierOption {
 	}
 }
 
-// WithJWKSProvider returns an option for NewInstanceIdentityVerifier that sets the google.OAuth2CertificateGetter.
-func WithJWKSProvider(v jose.JWKSProvider) InstanceIdentityVerifierOption {
+// WithKeySetProvider returns an option for NewInstanceIdentityVerifier that sets the google.KeySetProvider.
+func WithKeySetProvider(v google.KeySetProvider) InstanceIdentityVerifierOption {
 	return func(a *InstanceIdentityVerifier) {
-		a.jwksProvider = v
+		a.keySetProvider = v
 	}
 }
 
