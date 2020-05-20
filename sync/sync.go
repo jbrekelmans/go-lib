@@ -27,6 +27,7 @@ func (p *PanicError) Error() string {
 // then nil is returned.
 func CallInParallelReturnWhenAnyError(ctx context.Context, funcSlice ...func(ctx context.Context) error) error {
 	ctxCancelable, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
 	var waitGroup sync.WaitGroup
 	var mutex sync.Mutex
 	var errFirst error
@@ -63,9 +64,5 @@ func CallInParallelReturnWhenAnyError(ctx context.Context, funcSlice ...func(ctx
 		}()
 	}
 	waitGroup.Wait()
-
-	// This call is not necessary since cancelFunc is always called (unless this Goroutine panics somehow),
-	// but allows static code analysis to prove the context is cancelled.
-	cancelFunc()
 	return errFirst
 }
