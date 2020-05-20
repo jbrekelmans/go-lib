@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -13,25 +14,37 @@ const (
 	AuthenticationSchemeBearer = "Bearer"
 )
 
+// Matches any ASCII control characters, the double quote and the backslash.
+// This regexp matches all invalid characters of the "error" and "error_description" parameters (https://tools.ietf.org/html/rfc6750#section-3).
+var regexpCleanRFC26750ErrorDescription = regexp.MustCompile("[\\x00-\\x1F\x22\x5C\\x7F]")
+
 // BearerTokenAuthorizer is a function that authorizes a token.
 // If err is nil then data must not be nil.
-// data is an unspecified representation of a permissions that is passed along opaquely by the Authorizer returned by NewBearerAuthorizer.
-// To set the WWW-Authenticate response header, err should be a *WWWAuthenticateError.
+// Most use-cases where a failed authentication is successfully computed should return an error returned from ErrorInvalidBearerToken.
+// data is an unspecified representation of a permissions. See also NewBearerAuthorizer.
 type BearerTokenAuthorizer = func(bearerToken string) (data interface{}, err error)
 
 type bearerAuthorizer struct {
-	bearerTokenAuthorizer BearerTokenAuthorizer
+	bearerTokenAuthorizer         BearerTokenAuthorizer
+	realm                         string
+	wwwAuthenticateErrorRealmOnly *WWWAuthenticateError
 }
 
-// NewBearerAuthorizer is an Authorizer that accepts and challenges with the Bearer authentication scheme defined in
-// https://tools.ietf.org/html/rfc6750.
-// See BearerTokenAuthorizer.
-func NewBearerAuthorizer(bearerTokenAuthorizer BearerTokenAuthorizer) (Authorizer, error) {
+// NewBearerAuthorizer is an Authorizer for the Bearer authentication scheme defined in
+// https://tools.ietf.org/html/rfc6750 and defines the authorization of a single realm (https://tools.ietf.org/html/rfc2617).
+// See also BearerTokenAuthorizer.
+// The returned Authorizer will set the WWW-Authenticate response header if bearerTokenAuthorizer returns an error that is a valid
+// *WWWAuthenticateError. Otherwise, an Internal Server Error is written.
+func NewBearerAuthorizer(realm string, bearerTokenAuthorizer BearerTokenAuthorizer) (Authorizer, error) {
+	if err := ValidateFormattableAsQuotedPair(realm); err != nil {
+		return nil, fmt.Errorf("invalid realm: %w", err)
+	}
 	if bearerTokenAuthorizer == nil {
 		return nil, fmt.Errorf("bearerTokenAuthorizer must not be nil")
 	}
 	b := &bearerAuthorizer{
 		bearerTokenAuthorizer: bearerTokenAuthorizer,
+		realm:                 realm,
 	}
 	return b, nil
 }
@@ -39,32 +52,40 @@ func NewBearerAuthorizer(bearerTokenAuthorizer BearerTokenAuthorizer) (Authorize
 func (b *bearerAuthorizer) Authorize(w http.ResponseWriter, req *http.Request) interface{} {
 	authorizationHeaderValues := req.Header[HeaderNameAuthorization]
 	if len(authorizationHeaderValues) == 0 {
-		bearerWWWAuthenticateResponse(w, fmt.Sprintf("Request is missing required header named %s", HeaderNameAuthorization), "")
+		bearerWWWAuthenticateResponse(w, "", &Param{Attribute: "realm", Value: b.realm})
 		return nil
 	}
 	if len(authorizationHeaderValues) > 1 {
-		bearerWWWAuthenticateResponse(w, fmt.Sprintf("Request must have exactly one header named %s, but got %d", HeaderNameAuthorization,
-			len(authorizationHeaderValues)), "")
+		error := fmt.Sprintf("request must have exactly one header named %s, but got %d", HeaderNameAuthorization,
+			len(authorizationHeaderValues)) // This must comply with https://tools.ietf.org/html/rfc6750#section-3 (i.e. no double quotes)
+		bearerWWWAuthenticateResponse(w, error,
+			&Param{
+				Attribute: "realm",
+				Value:     b.realm,
+			},
+			&Param{
+				Attribute: "error_description",
+				Value:     error,
+			})
 		return nil
 	}
 	authorizationHeaderValue := authorizationHeaderValues[0]
 	i := strings.IndexByte(authorizationHeaderValue, ' ')
 	if i < 0 {
-		bearerWWWAuthenticateResponse(w, fmt.Sprintf("Request's %s header must contain a space", HeaderNameAuthorization), "")
+		bearerWWWAuthenticateResponse(w, "", &Param{Attribute: "realm", Value: b.realm})
 		return nil
 	}
 	authScheme := authorizationHeaderValue[:i]
+	// The authentication scheme is case-insensitive: https://tools.ietf.org/html/rfc2617#section-1.2
 	if strings.ToLower(authScheme) != strings.ToLower(AuthenticationSchemeBearer) {
-		bearerWWWAuthenticateResponse(w,
-			fmt.Sprintf("Request's %s header sets unsupported authentication scheme %#v", HeaderNameAuthorization, authScheme),
-			"Request's %s header sets an unsupported authentication scheme")
+		bearerWWWAuthenticateResponse(w, "", &Param{Attribute: "realm", Value: b.realm})
 		return nil
 	}
 	bearerToken := strings.TrimLeft(authorizationHeaderValue[i+1:], " ")
 	data, err := b.bearerTokenAuthorizer(bearerToken)
 	if err != nil {
 		if wwwAuthenticateErr, ok := err.(*WWWAuthenticateError); ok {
-			bearerWWWAuthenticateResponseCommon(w, wwwAuthenticateErr)
+			bearerWWWAuthenticateResponseCommon(w, wwwAuthenticateErr, b.realm)
 			return nil
 		}
 		log.Errorf("error authorizing bearer token: %v", err)
@@ -79,14 +100,7 @@ func (b *bearerAuthorizer) Authorize(w http.ResponseWriter, req *http.Request) i
 	return data
 }
 
-func bearerWWWAuthenticateResponse(w http.ResponseWriter, body string, errorDescription string, params ...*Param) {
-	if errorDescription == "" {
-		errorDescription = body
-	}
-	params = append(params, &Param{
-		Attribute: "error_description",
-		Value:     errorDescription,
-	})
+func bearerWWWAuthenticateResponse(w http.ResponseWriter, body string, params ...*Param) {
 	wwwAuthenticateErr, err := NewWWWAuthenticateError(body, []*Challenge{
 		{
 			Scheme: AuthenticationSchemeBearer,
@@ -98,27 +112,33 @@ func bearerWWWAuthenticateResponse(w http.ResponseWriter, body string, errorDesc
 		internalServerError(w)
 		return
 	}
-	bearerWWWAuthenticateResponseCommon(w, wwwAuthenticateErr)
+	bearerWWWAuthenticateResponseCommon(w, wwwAuthenticateErr, "")
 	return
 }
 
-func bearerWWWAuthenticateResponseCommon(w http.ResponseWriter, wwwAuthenticateErr *WWWAuthenticateError) {
+func bearerWWWAuthenticateResponseCommon(w http.ResponseWriter, wwwAuthenticateErr *WWWAuthenticateError, defaultRealm string) {
 	if err := ValidateBearerChallenge(wwwAuthenticateErr); err != nil {
 		log.Errorf("error formatting %s %s response header: %v", HeaderNameWWWAuthenticate, AuthenticationSchemeBearer, err)
 		internalServerError(w)
 		return
 	}
-	w.Header().Add(HeaderNameWWWAuthenticate, wwwAuthenticateErr.headerValue)
+	headerValue, err := wwwAuthenticateErr.HeaderValue(defaultRealm)
+	if err != nil {
+		log.Errorf("error formatting %s %s response header: %v", HeaderNameWWWAuthenticate, AuthenticationSchemeBearer, err)
+		internalServerError(w)
+		return
+	}
+	w.Header().Add(HeaderNameWWWAuthenticate, headerValue)
 	http.Error(w, wwwAuthenticateErr.Error(), http.StatusUnauthorized)
 }
 
 // ValidateBearerChallenge validates a challenge as per https://tools.ietf.org/html/rfc6750.
 func ValidateBearerChallenge(w *WWWAuthenticateError) error {
 	if w.challenges == nil {
-		return fmt.Errorf("w must be created through NewWWWAuthenticateError")
+		return fmt.Errorf(`w must be created through NewWWWAuthenticateError`)
 	}
 	for i, challenge := range w.challenges {
-		if strings.ToLower(challenge.Scheme) != strings.ToLower(AuthenticationSchemeBearer) {
+		if challenge.Scheme != AuthenticationSchemeBearer {
 			return fmt.Errorf("w.challenges[%d].Scheme (%#v) must be case-insensitive equal to %#v", i, challenge.Scheme,
 				AuthenticationSchemeBearer)
 		}
@@ -145,7 +165,7 @@ func ValidateBearerChallenge(w *WWWAuthenticateError) error {
 						return fmt.Errorf("w.challenges[%d].Params[%d].Value (%#v) must not be empty and must not contain a substring of two "+
 							"space characters", i, j, param.Value)
 					}
-					if WriteQuotedPairWouldWriteBackslashes(scopeValue) {
+					if strings.Contains(scopeValue, "\\\"\t") {
 						return fmt.Errorf(`w.challenges[%d].Params[%d].Value is invalid: the scope value %#v has non-visible ASCII `+
 							`characters or contains a double quote or backslash`, i, j, scopeValue)
 					}
@@ -153,21 +173,21 @@ func ValidateBearerChallenge(w *WWWAuthenticateError) error {
 			// the remaining attributes are case-sensitive for the same reason as the scope attribute
 			case param.Attribute == "error":
 				errorCount++
-				if WriteQuotedPairWouldWriteBackslashes(param.Value) {
+				if strings.Contains(param.Value, "\\\"\t") {
 					return fmt.Errorf(`w.challenges[%d].Params[%d].Value is invalid: attribute "error" has a value %#v that has non-visible ASCII `+
-						`characters or contains a double quote or backslash`, i, j, param.Value)
+						`characters (except space) or contains a double quote or backslash`, i, j, param.Value)
 				}
 			case param.Attribute == "error_description":
 				errorDescriptionCount++
-				if WriteQuotedPairWouldWriteBackslashes(param.Value) {
+				if strings.Contains(param.Value, "\\\"\t") {
 					return fmt.Errorf(`w.challenges[%d].Params[%d].Value is invalid: attribute "error_description" has a value %#v that has non-visible ASCII `+
-						`characters or contains a double quote or backslash`, i, j, param.Value)
+						`characters (except space) or contains a double quote or backslash`, i, j, param.Value)
 				}
 			case param.Attribute == "error_uri":
 				errorURICount++
-				if strings.Contains(param.Value, ` "\`) {
+				if strings.Contains(param.Value, "\\\"\t ") {
 					return fmt.Errorf(`w.challenges[%d].Params[%d].Value is invalid: attribute "error_uri" has a value %#v that has non-visible ASCII `+
-						`characters or contains a space, double quote or backslash`, i, j, param.Value)
+						`characters or contains a double quote or backslash`, i, j, param.Value)
 				}
 			}
 		}
@@ -193,4 +213,33 @@ func ValidateBearerChallenge(w *WWWAuthenticateError) error {
 		}
 	}
 	return nil
+}
+
+func internalServerError(w http.ResponseWriter) {
+	code := http.StatusInternalServerError
+	http.Error(w, http.StatusText(code), code)
+}
+
+// ErrorInvalidBearerToken is convenient wrapper around NewWWWAuthenticateError that is not prone to errors.
+func ErrorInvalidBearerToken(error string) *WWWAuthenticateError {
+	errorCleaned := regexpCleanRFC26750ErrorDescription.ReplaceAllString(error, "")
+	wwwAuthenticateErr, err := NewWWWAuthenticateError(error, []*Challenge{
+		{
+			Scheme: AuthenticationSchemeBearer,
+			Params: []*Param{
+				{
+					Attribute: "error",
+					Value:     "invalid_token",
+				},
+				{
+					Attribute: "error_description",
+					Value:     errorCleaned,
+				},
+			},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return wwwAuthenticateErr
 }

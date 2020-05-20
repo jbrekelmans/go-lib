@@ -18,6 +18,13 @@ type Param struct {
 	Value     string
 }
 
+// ValidateFormattableAsQuotedPair returns nil iff val can be formatted as a quoted pair (as defined in https://tools.ietf.org/html/rfc7230)
+// that parses into val.
+func ValidateFormattableAsQuotedPair(val string) error {
+	var sb strings.Builder
+	return WriteQuotedPair(&sb, val)
+}
+
 // WriteQuotedPair writes a quoted-pair production as defined in https://tools.ietf.org/html/rfc7230 that parses into val to sb.
 func WriteQuotedPair(sb *strings.Builder, val string) error {
 	sb.WriteByte('"')
@@ -35,9 +42,4 @@ func WriteQuotedPair(sb *strings.Builder, val string) error {
 	}
 	sb.WriteByte('"')
 	return nil
-}
-
-// WriteQuotedPairWouldWriteBackslashes returns true iff val contains a double quote or backslash character.
-func WriteQuotedPairWouldWriteBackslashes(val string) bool {
-	return strings.ContainsAny(val, `"\`)
 }
