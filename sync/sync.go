@@ -23,7 +23,7 @@ func (p *PanicError) Error() string {
 // 1. the error is returned; -or
 // 2. the panic is returned as a *PanicError;
 // respectively.
-// If none of the above conditions occur (no function returns an error and all functions that panic are unrecoverable panics)
+// If none of the above conditions occur (no function returns an error and no panics are recoverable)
 // then nil is returned.
 func CallInParallelReturnWhenAnyError(ctx context.Context, funcSlice ...func(ctx context.Context) error) error {
 	ctxCancelable, cancelFunc := context.WithCancel(ctx)
