@@ -21,7 +21,7 @@ var regexpCleanRFC26750ErrorDescription = regexp.MustCompile("[\\x00-\\x1F\x22\x
 // BearerTokenAuthorizer is a function that authorizes a token.
 // If err is nil then data must not be nil.
 // Most use-cases where a failed authentication is successfully computed should return an error returned from ErrorInvalidBearerToken.
-// data is an unspecified representation of a permissions. See also NewBearerAuthorizer.
+// data is an unspecified representation of permissions. See also NewBearerAuthorizer.
 type BearerTokenAuthorizer = func(bearerToken string) (data interface{}, err error)
 
 type bearerAuthorizer struct {
@@ -220,7 +220,9 @@ func internalServerError(w http.ResponseWriter) {
 	http.Error(w, http.StatusText(code), code)
 }
 
-// ErrorInvalidBearerToken is convenient wrapper around NewWWWAuthenticateError that is not prone to errors.
+// ErrorInvalidBearerToken is convenient wrapper around NewWWWAuthenticateError.
+// Where NewWWWAuthenticateError returns an error on RFC violations, this function strips invalid characters from
+// strings and as such never violates RFC.
 func ErrorInvalidBearerToken(error string) *WWWAuthenticateError {
 	errorCleaned := regexpCleanRFC26750ErrorDescription.ReplaceAllString(error, "")
 	wwwAuthenticateErr, err := NewWWWAuthenticateError(error, []*Challenge{
@@ -239,6 +241,7 @@ func ErrorInvalidBearerToken(error string) *WWWAuthenticateError {
 		},
 	})
 	if err != nil {
+		// This should never happen
 		panic(err)
 	}
 	return wwwAuthenticateErr
