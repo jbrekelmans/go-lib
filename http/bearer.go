@@ -27,7 +27,6 @@ type BearerTokenAuthorizer = func(bearerToken string) (data interface{}, err err
 type bearerAuthorizer struct {
 	bearerTokenAuthorizer         BearerTokenAuthorizer
 	realm                         string
-	wwwAuthenticateErrorRealmOnly *WWWAuthenticateError
 }
 
 // NewBearerAuthorizer is an Authorizer for the Bearer authentication scheme defined in
