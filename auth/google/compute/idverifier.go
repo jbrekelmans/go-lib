@@ -158,7 +158,7 @@ func (a *InstanceIdentityVerifier) validateClaims2(ctx context.Context, c *Insta
 		if googleErr, ok := err.(*googleapi.Error); ok && googleErr.Code >= 500 {
 			return err
 		}
-		return &VerifyError{e: fmt.Sprintf("error during get call: %w", err)}
+		return &VerifyError{e: fmt.Sprintf("error during get call: %v", err)}
 	}
 	// Only Running and Stopping are valid, see https://cloud.google.com/compute/docs/instances/instance-life-cycle
 	if instance.Status != InstanceStatusRunning && instance.Status != InstanceStatusStopping {
