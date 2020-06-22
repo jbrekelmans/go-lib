@@ -6,7 +6,7 @@ import (
 )
 
 func Test_ParseWwwAuthenticateHeaderValue_Success(t *testing.T) {
-	headerValue := `Bearer realm="https://gcr.io/v2/token",service="gcr.io",scope="repository:scratch-playground/demo-app:pull"`
+	headerValue := `Bearer realm="bla",param1=value1,param2="value2"`
 	challenges, err := ParseWwwAuthenticateHeaderValue(nil, headerValue)
 	if err != nil {
 		t.Fatal(err)
@@ -17,15 +17,15 @@ func Test_ParseWwwAuthenticateHeaderValue_Success(t *testing.T) {
 			Params: []*Param{
 				{
 					Attribute: "realm",
-					Value:     "https://gcr.io/v2/token",
+					Value:     "bla",
 				},
 				{
-					Attribute: "service",
-					Value:     "gcr.io",
+					Attribute: "param1",
+					Value:     "value1",
 				},
 				{
-					Attribute: "scope",
-					Value:     "repository:scratch-playground/demo-app:pull",
+					Attribute: "param2",
+					Value:     "value2",
 				},
 			},
 		},
