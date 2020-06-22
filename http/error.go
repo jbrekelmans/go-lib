@@ -25,8 +25,13 @@ func NewWWWAuthenticateError(error string, challenges []*Challenge) (w *WWWAuthe
 		if !IsToken(challenge.Scheme) {
 			return nil, fmt.Errorf("challenges[%d].Scheme (%#v) is not a valid token", i, challenge.Scheme)
 		}
-		if len(challenge.Params) == 0 {
-			return nil, fmt.Errorf("challenges[%d].Params must not be nil or empty", i)
+		if challenge.Token68 == "" && len(challenge.Params) == 0 {
+			return nil, fmt.Errorf("challenges[%d] is invalid: .Token68 must not be empty or .Params must not be nil or empty", i)
+		} else if challenge.Token68 != "" && len(challenge.Params) > 0 {
+			return nil, fmt.Errorf("challenges[%d] is invalid: either .Token68 must be empty or .Params must not be empty", i)
+		}
+		if challenge.Token68 != "" && !IsToken68(challenge.Token68) {
+			return nil, fmt.Errorf("challenges[%d].Token68 is invalid", i)
 		}
 		for j, param := range challenge.Params {
 			if param == nil {
@@ -66,25 +71,29 @@ func (w *WWWAuthenticateError) HeaderValue(defaultRealm string) (string, error) 
 		}
 		headerValue.WriteString(challenge.Scheme)
 		headerValue.WriteByte(' ')
-		hasRealm := false
-		for _, param := range challenge.Params {
-			if strings.ToLower(param.Attribute) == "realm" {
-				hasRealm = true
-				break
+		if challenge.Token68 != "" {
+			headerValue.WriteString(challenge.Token68)
+		} else {
+			hasRealm := false
+			for _, param := range challenge.Params {
+				if strings.ToLower(param.Attribute) == "realm" {
+					hasRealm = true
+					break
+				}
 			}
-		}
-		if !hasRealm {
-			headerValue.WriteString("realm=")
-			_ = WriteQuotedPair(&headerValue, defaultRealm)
-		}
-		for j, param := range challenge.Params {
-			if j > 0 || !hasRealm {
-				headerValue.WriteByte(',')
+			if !hasRealm {
+				headerValue.WriteString("realm=")
+				_ = WriteQuotedPair(&headerValue, defaultRealm)
 			}
-			headerValue.WriteString(param.Attribute)
-			headerValue.WriteByte('=')
-			// NewWWWAuthenticateError ensures this cannot error.
-			_ = WriteQuotedPair(&headerValue, param.Value)
+			for j, param := range challenge.Params {
+				if j > 0 || !hasRealm {
+					headerValue.WriteByte(',')
+				}
+				headerValue.WriteString(param.Attribute)
+				headerValue.WriteByte('=')
+				// NewWWWAuthenticateError ensures this cannot error.
+				_ = WriteQuotedPair(&headerValue, param.Value)
+			}
 		}
 	}
 	return headerValue.String(), nil
@@ -92,6 +101,7 @@ func (w *WWWAuthenticateError) HeaderValue(defaultRealm string) (string, error) 
 
 // Challenge is part of a WWWAuthenticate error. See NewWWWAuthenticateError.
 type Challenge struct {
-	Scheme string
-	Params []*Param
+	Scheme  string
+	Params  []*Param
+	Token68 string
 }
