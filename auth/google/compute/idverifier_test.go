@@ -50,7 +50,7 @@ func init() {
 	log.SetLevel(log.TraceLevel)
 }
 
-func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (i *InstanceIdentityVerifier, teardown func()) {
+func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (ctx context.Context, i *InstanceIdentityVerifier, teardown func()) {
 	disposable := test.RedirectLogs(t)
 	timeSource := func() time.Time {
 		return testTimeNow
@@ -68,7 +68,7 @@ func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (i *InstanceIde
 		WithTimeSource(timeSource),
 	}, opts...)
 	var err error
-	i, err = NewInstanceIdentityVerifier(ctx, testAudience, opts...)
+	i, err = NewInstanceIdentityVerifier(testAudience, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,10 +80,10 @@ func setup(t *testing.T, opts ...InstanceIdentityVerifierOption) (i *InstanceIde
 }
 
 func Test_InstanceIdentityVerifier_Verify_Success(t *testing.T) {
-	a, teardown := setup(t)
+	ctx, a, teardown := setup(t)
 	defer teardown()
 
-	i, err := a.Verify(testJWTToken)
+	i, err := a.Verify(ctx, testJWTToken)
 	if err != nil {
 		t.Fatal(err)
 	}

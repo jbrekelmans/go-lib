@@ -17,7 +17,6 @@ import (
 
 	"github.com/jbrekelmans/go-lib/auth"
 	"github.com/jbrekelmans/go-lib/auth/google"
-	jaspersync "github.com/jbrekelmans/go-lib/sync"
 )
 
 const (
@@ -61,7 +60,6 @@ type InstanceIdentity struct {
 type InstanceIdentityVerifier struct {
 	allowNonUserManagedServiceAccounts bool
 	audience                           string
-	ctx                                context.Context
 	computeIntanceGetter               InstanceGetter
 	jwtClaimsLeeway                    time.Duration
 	keySetProvider                     google.KeySetProvider
@@ -71,13 +69,11 @@ type InstanceIdentityVerifier struct {
 }
 
 // NewInstanceIdentityVerifier is the constructor for InstanceIdentityVerifier. See https://cloud.google.com/compute/docs/instances/verifying-instance-identity.
-func NewInstanceIdentityVerifier(ctx context.Context, audience string, opts ...InstanceIdentityVerifierOption) (*InstanceIdentityVerifier, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("ctx must not be nil")
-	}
+// NOTE: this function uses a hardcoded context.Background() when compiling for app engine. It is recommend
+// to set options WithInstanceGetter and WithServiceAccountGetter when compiling for app engine.
+func NewInstanceIdentityVerifier(audience string, opts ...InstanceIdentityVerifierOption) (*InstanceIdentityVerifier, error) {
 	a := &InstanceIdentityVerifier{
 		audience:                   audience,
-		ctx:                        ctx,
 		jwtClaimsLeeway:            auth.DefaultJWTClaimsLeeway,
 		maximumJWTNotExpiredPeriod: auth.DefaultMaximumJWTNotExpiredPeriod,
 	}
@@ -98,7 +94,8 @@ func NewInstanceIdentityVerifier(ctx context.Context, audience string, opts ...I
 			defaultHTTPClient = cleanhttp.DefaultPooledClient()
 		}
 		var err error
-		computeService, err = compute.NewService(ctx, option.WithHTTPClient(defaultHTTPClient))
+		// We hardcode context.Background() here because the context is only used when compiling for app engine.
+		computeService, err = compute.NewService(context.Background(), option.WithHTTPClient(defaultHTTPClient))
 		if err != nil {
 			return nil, fmt.Errorf("error creating compute service: %w", err)
 		}
@@ -112,7 +109,8 @@ func NewInstanceIdentityVerifier(ctx context.Context, audience string, opts ...I
 			defaultHTTPClient = cleanhttp.DefaultPooledClient()
 		}
 		var err error
-		iamService, err = iam.NewService(ctx, option.WithHTTPClient(defaultHTTPClient))
+		// We hardcode context.Background() here because the context is only used when compiling for app engine.
+		iamService, err = iam.NewService(context.Background(), option.WithHTTPClient(defaultHTTPClient))
 		if err != nil {
 			return nil, fmt.Errorf("error creating iam service: %w", err)
 		}
@@ -211,7 +209,7 @@ func (a *InstanceIdentityVerifier) validateServiceAccountClaims(ctx context.Cont
 // Verify authenticates a GCE identity JWT token (see https://cloud.google.com/compute/docs/instances/verifying-instance-identity).
 // If the returned error is a *VerifyError then jwtString was successfully determined to be invalid.
 // Otherwise, if an error is returned, the verification attempt failed.
-func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, error) {
+func (a *InstanceIdentityVerifier) Verify(ctx context.Context, jwtString string) (*InstanceIdentity, error) {
 	if a.keySetProvider == nil {
 		return nil, fmt.Errorf("a must be created via NewInstanceIdentityVerifier")
 	}
@@ -222,7 +220,7 @@ func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, 
 	if len(jwtParsed.Headers) != 1 {
 		return nil, &VerifyError{e: "jwtString must encode a JWT with exactly one header"}
 	}
-	keySet, err := a.keySetProvider.Get(a.ctx)
+	keySet, err := a.keySetProvider.Get(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting public key used for JWT signature verification: %w", err)
 	}
@@ -260,31 +258,42 @@ func (a *InstanceIdentityVerifier) Verify(jwtString string) (*InstanceIdentity, 
 		return nil, &VerifyError{e: fmt.Sprintf(`JWT claim "email" (%#v) is not a vallid email or it illegally is not a user-managed `+
 			`service account email`, claims2.Email)}
 	}
-	err = jaspersync.CallInParallelReturnWhenAnyError(a.ctx, func(ctx context.Context) error {
+
+	errChannel := make(chan error)
+	ctx, cancelFunc := context.WithCancel(ctx)
+	defer cancelFunc()
+	go func() {
 		err := a.validateClaims2(ctx, claims2)
 		if err != nil {
 			project := claims2.Google.ComputeEngine.ProjectID
 			zone := claims2.Google.ComputeEngine.Zone
 			instance := claims2.Google.ComputeEngine.InstanceName
 			if _, ok := err.(*VerifyError); ok {
-				return &VerifyError{e: fmt.Sprintf("error validating JWT claims against compute engine API (instance %s/%s/%s): %v", project, zone, instance,
-					err)}
+				err = &VerifyError{e: fmt.Sprintf("error validating JWT claims against compute engine API (instance %s/%s/%s): %v", project,
+					zone, instance, err)}
+			} else {
+				err = fmt.Errorf("error validating JWT claims against compute engine API (instance %s/%s/%s): %w", project, zone,
+					instance, err)
 			}
-			return fmt.Errorf("error validating JWT claims against compute engine API (instance %s/%s/%s): %w", project, zone, instance,
-				err)
 		}
-		return nil
-	}, func(ctx context.Context) error {
+		errChannel <- err
+	}()
+	go func() {
 		err := a.validateServiceAccountClaims(ctx, claims2.Email, claims1.Subject)
 		if err != nil {
 			var googleErr *googleapi.Error
 			if errors.As(err, &googleErr) && googleErr.Code >= 500 {
-				return fmt.Errorf("error validating JWT claims against IAM API (service account %s): %w", claims1.Subject, err)
+				err = fmt.Errorf("error validating JWT claims against IAM API (service account %s): %w", claims1.Subject, err)
+			} else {
+				err = &VerifyError{e: fmt.Sprintf("error validating JWT claims against IAM API (service account %s): %v", claims1.Subject, err)}
 			}
-			return &VerifyError{e: fmt.Sprintf("error validating JWT claims against IAM API (service account %s): %v", claims1.Subject, err)}
 		}
-		return nil
-	})
+		errChannel <- err
+	}()
+	err = <-errChannel
+	if err != nil {
+		return nil, err
+	}
 	return &InstanceIdentity{
 		Claims1: claims1,
 		Claims2: claims2,

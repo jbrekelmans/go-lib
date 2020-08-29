@@ -56,7 +56,6 @@ func mainCore() error {
 		jaspergoogle.HTTPSKeySetProvider(httpClient),
 	)
 	idVerifier, err := jaspercompute.NewInstanceIdentityVerifier(
-		ctx,
 		"https://example.com/",
 		jaspercompute.WithAllowNonUserManagedServiceAccounts(true),
 		jaspercompute.WithInstanceGetter(func(ctx context.Context, project, zone, name string) (*compute.Instance, error) {
@@ -70,7 +69,7 @@ func mainCore() error {
 	if err != nil {
 		return err
 	}
-	ret, err := idVerifier.Verify(jwtToken)
+	ret, err := idVerifier.Verify(ctx, jwtToken)
 	if err != nil {
 		return err
 	}
