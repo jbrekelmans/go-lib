@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -22,7 +23,7 @@ var regexpCleanRFC26750ErrorDescription = regexp.MustCompile("[\\x00-\\x1F\x22\x
 // If err is nil then data must not be nil.
 // Most use-cases where a failed authentication is successfully computed should return an error returned from ErrorInvalidBearerToken.
 // data is an unspecified representation of permissions. See also NewBearerAuthorizer.
-type BearerTokenAuthorizer = func(bearerToken string) (data interface{}, err error)
+type BearerTokenAuthorizer = func(ctx context.Context, bearerToken string) (data interface{}, err error)
 
 type bearerAuthorizer struct {
 	bearerTokenAuthorizer BearerTokenAuthorizer
@@ -81,7 +82,7 @@ func (b *bearerAuthorizer) Authorize(w http.ResponseWriter, req *http.Request) i
 		return nil
 	}
 	bearerToken := strings.TrimLeft(authorizationHeaderValue[i+1:], " ")
-	data, err := b.bearerTokenAuthorizer(bearerToken)
+	data, err := b.bearerTokenAuthorizer(req.Context(), bearerToken)
 	if err != nil {
 		if wwwAuthenticateErr, ok := err.(*WWWAuthenticateError); ok {
 			bearerWWWAuthenticateResponseCommon(w, wwwAuthenticateErr, b.realm)
