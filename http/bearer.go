@@ -25,8 +25,8 @@ var regexpCleanRFC26750ErrorDescription = regexp.MustCompile("[\\x00-\\x1F\x22\x
 type BearerTokenAuthorizer = func(bearerToken string) (data interface{}, err error)
 
 type bearerAuthorizer struct {
-	bearerTokenAuthorizer         BearerTokenAuthorizer
-	realm                         string
+	bearerTokenAuthorizer BearerTokenAuthorizer
+	realm                 string
 }
 
 // NewBearerAuthorizer is an Authorizer for the Bearer authentication scheme defined in
@@ -76,7 +76,7 @@ func (b *bearerAuthorizer) Authorize(w http.ResponseWriter, req *http.Request) i
 	}
 	authScheme := authorizationHeaderValue[:i]
 	// The authentication scheme is case-insensitive: https://tools.ietf.org/html/rfc2617#section-1.2
-	if strings.ToLower(authScheme) != strings.ToLower(AuthenticationSchemeBearer) {
+	if !strings.EqualFold(authScheme, AuthenticationSchemeBearer) {
 		bearerWWWAuthenticateResponse(w, "", &Param{Attribute: "realm", Value: b.realm})
 		return nil
 	}
@@ -149,7 +149,7 @@ func ValidateBearerChallenge(w *WWWAuthenticateError) error {
 		for j, param := range challenge.Params {
 			switch {
 			// The realm directive is case-insensitive: https://tools.ietf.org/html/rfc2617#section-1.2
-			case strings.ToLower(param.Attribute) == "realm":
+			case strings.EqualFold(param.Attribute, "realm"):
 				realmCount++
 			// scope is case-sensitive
 			// https://tools.ietf.org/html/rfc6750#section-1.1

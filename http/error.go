@@ -76,7 +76,7 @@ func (w *WWWAuthenticateError) HeaderValue(defaultRealm string) (string, error) 
 		} else {
 			hasRealm := false
 			for _, param := range challenge.Params {
-				if strings.ToLower(param.Attribute) == "realm" {
+				if strings.EqualFold(param.Attribute, "realm") {
 					hasRealm = true
 					break
 				}
