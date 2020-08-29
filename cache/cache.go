@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-
-	jaspersync "github.com/jbrekelmans/go-lib/sync"
 )
 
 // CachedEvaluator is a cache for an evaluator (a function) such that the evaluator is expensive enough to justify ensuring that only
@@ -16,7 +14,6 @@ import (
 type CachedEvaluator interface {
 	GetCacheOnly() (value interface{})
 
-	// err can be a *"github.com/jbrekelmans/go-lib/sync".PanicError in circumstances where the Goroutine computing the value panics and the panic is recoverable.
 	Get(ctx context.Context) (value interface{}, err error)
 
 	// Evaluate is the same as Get, except:
@@ -92,23 +89,17 @@ func (c *cachedEvaluator) evaluateLockedSection() *operation {
 	var ctx context.Context
 	ctx, o.cancelFunc = context.WithCancel(context.Background())
 	go func() {
-		canRecover := true
+		didPanic := true
 		defer func() {
-			if canRecover {
-				// If we get here then a call to factory panicked
-				data := recover()
-				o.err = &jaspersync.PanicError{
-					Data: data,
-				}
-				close(waitChannel)
+			close(waitChannel)
+			if didPanic {
 				c.mutex.Lock()
 				defer c.mutex.Unlock()
 				c.operation = nil
 			}
 		}()
 		o.value, o.err = c.evaluator(ctx)
-		canRecover = false
-		close(waitChannel)
+		didPanic = false
 		c.mutex.Lock()
 		defer c.mutex.Unlock()
 		c.operation = nil
