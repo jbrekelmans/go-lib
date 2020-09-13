@@ -1,8 +1,9 @@
+name: test1
 on:
   pull_request:
     branches: ["master"]
 jobs:
-  test:
+  test2:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
