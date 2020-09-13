@@ -31,6 +31,7 @@ func NewBool(b bool) *bool {
 }
 
 // NormalizePort normalizes the port of u.
+// If u's port is a named port then an error is returned.
 // If u's port is the default port for scheme u.Scheme and preferExplicitPort is false then u's port is removed.
 // If u does not have a port and preferExplicitPort is true then u's port is set to the default port for scheme u.Scheme.
 // The default port for scheme x is defined by schemeDefaultPorts(x).
@@ -106,7 +107,9 @@ type ValidateURLOptions struct {
 // ValidateURL returns u if and only if no error occurs.
 // If opts.Abs != nil and u.IsAbs() != *opts.Abs then an error is returned.
 // If len(opts.AllowedSchemes) > 0 and !u.IsAbs() and u.Scheme is not in opts.AllowedSchemes then an error is returned.
-// If opts.NormalizePort != nil then ValidateURL calls NormalizePort(u, *opts.NormalizePort, opts.SchemeDefaultPorts).
+// If opts.NormalizePort != nil then:
+//    1. ValidateURL calls NormalizePort(u, *opts.NormalizePort, opts.SchemeDefaultPorts).
+//    2. ValidateURL considers named ports invalid and if u.IsAbs() and u.Port() is not an integer then an error is returned.
 // If opts.StripPathTrailingSlashes then the longest trailing sequence of forward slashes is trimmed from u.Path and u.RawPath.
 // 		Unless opts.StripPathTrailingSlashesNoPercentEncoded is true, percent encoded forward slashes are also included in this sequence.
 // For other options see source code.
