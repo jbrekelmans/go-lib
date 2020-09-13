@@ -31,7 +31,8 @@ var testJWTToken = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImMxNzcxODE0YmE2YTcwNjkzZmI5NDEy
 	"-lK-AY7rGi2_WbkR30ANOxH6ZQGhfTh1-uZ9rFr27fWZg"
 var testKeySetProvider google.KeySetProvider
 var testServiceAccount = &iam.ServiceAccount{
-	Email: "198285616681-compute@developer.gserviceaccount.com",
+	Email:    "198285616681-compute@developer.gserviceaccount.com",
+	UniqueId: "115586174090660717475",
 }
 var testTimeNow time.Time
 
