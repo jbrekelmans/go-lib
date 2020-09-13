@@ -1,6 +1,6 @@
 module github.com/jbrekelmans/go-lib
 
-go 1.13
+go 1.14
 
 require (
 	github.com/hashicorp/go-cleanhttp v0.5.1
