@@ -8,10 +8,11 @@ import (
 )
 
 var schemeDefaultPorts = map[string]int{
-	"http":  80,
-	"https": 443,
-	"ws":    80,
-	"wss":   443,
+	"http":   80,
+	"https":  443,
+	"socks5": 1080,
+	"ws":     80,
+	"wss":    443,
 }
 
 // SchemeDefaultPorts returns the default port for scheme s.
