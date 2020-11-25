@@ -185,7 +185,7 @@ func (a *InstanceIdentityVerifier) validateClaims2(ctx context.Context, c *Insta
 }
 
 func (a *InstanceIdentityVerifier) validateServiceAccountClaims(ctx context.Context, email, uniqueID string) error {
-	serviceAccount, err := a.serviceAccountGetter(ctx, fmt.Sprintf("projects/*/serviceAccounts/%s", uniqueID))
+	serviceAccount, err := a.serviceAccountGetter(ctx, fmt.Sprintf("projects/-/serviceAccounts/%s", uniqueID))
 	if err != nil {
 		return fmt.Errorf("error during get call: %w", err)
 	}
