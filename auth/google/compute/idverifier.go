@@ -166,10 +166,15 @@ func (a *InstanceIdentityVerifier) validateClaims2(ctx context.Context, c *Insta
 	if err != nil {
 		return &VerifyError{e: fmt.Sprintf("error parsing instance's creation timestamp: %v", err)}
 	}
-	if creationTime.Unix() != c.Google.ComputeEngine.InstanceCreationTimestamp {
-		return &VerifyError{e: fmt.Sprintf("JWT claims instance creation timestamp is %d, but it is actually %d (in unix timestamps)",
+	creationTimeUnix := creationTime.Unix()
+	// The actual instance creation time includes nanoseconds, but the creation time claimed in the JWT does not.
+	// This means we should round when comparing, but since we do not want to assume a round algorithm here, since it
+	// would need to match Google's. Instead we reject the JWT if the claimed creation time is not one of
+	// floor(actualCreationTime) and  ceil(actualCreationTime).
+	if creationTimeUnix+1 != c.Google.ComputeEngine.InstanceCreationTimestamp && creationTime.Unix() != c.Google.ComputeEngine.InstanceCreationTimestamp {
+		return &VerifyError{e: fmt.Sprintf("JWT claims instance creation timestamp (%d) is not close to actual creation time (%d) (in unix timestamps)",
 			c.Google.ComputeEngine.InstanceCreationTimestamp,
-			creationTime.Unix())}
+			creationTimeUnix)}
 	}
 	found := false
 	for _, serviceAccount := range instance.ServiceAccounts {
