@@ -28,7 +28,7 @@ type staticKeySetProvider struct {
 	keySet KeySet
 }
 
-// StaticKeySetProvider is an in-meemory KeySetProvider.
+// StaticKeySetProvider is an in-memory KeySetProvider.
 // The values of the keySet parameter should be PEM encoded X509 certificates.
 func StaticKeySetProvider(keySet map[string]string) (KeySetProvider, error) {
 	s := &staticKeySetProvider{
