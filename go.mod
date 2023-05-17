@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/hashicorp/go-cleanhttp v0.5.2
-	github.com/sirupsen/logrus v1.9.0
+	github.com/sirupsen/logrus v1.9.1
 	golang.org/x/net v0.9.0
 	golang.org/x/oauth2 v0.7.0
 	google.golang.org/api v0.111.0
