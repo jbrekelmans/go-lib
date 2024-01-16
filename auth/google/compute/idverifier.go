@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/hashicorp/go-cleanhttp"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
-	"gopkg.in/square/go-jose.v2/jwt"
 
 	"github.com/jbrekelmans/go-lib/auth"
 	"github.com/jbrekelmans/go-lib/auth/google"
